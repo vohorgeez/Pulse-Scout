@@ -3,6 +3,7 @@ import requests
 import pandas as pd
 import sqlite3
 from config import CSV_SOURCE, RAW_DIR, DB_PATH
+from config import API_SOURCES
 
 """
 Pipeline:
@@ -102,10 +103,57 @@ def write_ticks(df: pd.DataFrame, db_path: Path) -> int:
 
     return after - before
 
+def fetch_coingecko_market_chart(base_url: str, coin_id: str, vs_currency: str, days: str) -> dict:
+    url = f"{base_url}/coins/{coin_id}/market_chart"
+    params = {"vs_currency": vs_currency, "days": days}
+    resp = requests.get(url, params=params, timeout=30)
+    if resp.status_code != 200:
+        raise RuntimeError(f"CoinGecko API error: HTTP {resp.status_code} - {resp.text[:200]}")
+    if resp.status_code in (401, 403):
+        raise RuntimeError(
+            f"CoinGecko blocked the request (HTTP {resp.status_code})."
+            f"Try reducing 'days' (e.g., 365 or 90). Response: {resp.text[:200]}"
+        )
+    return resp.json()
+
+def normalize_coingecko_market_chart(payload: dict, symbol: str, currency: str, source: str) -> pd.DataFrame:
+    prices = pd.DataFrame(payload["prices"], columns=["ts_ms", "price"])
+    vols = pd.DataFrame(payload["total_volumes"], columns=["ts_ms", "volume"])
+
+    df = prices.merge(vols, on="ts_ms", how="left")
+    df["ts"] = pd.to_datetime(df["ts_ms"], unit="ms", utc=True).dt.tz_convert(None)
+
+    df = df[["ts", "price", "volume"]].copy()
+    df["symbol"] = symbol
+    df["currency"] = currency
+    df["source"] = source
+
+    df["price"] = pd.to_numeric(df["price"], errors="coerce")
+    df["volume"] = pd.to_numeric(df["volume"], errors="coerce")
+    df = df.dropna(subset=["ts", "price"])
+
+    return df
+
 def main():
-    download_csv(CSV_SOURCE, RAW_DIR)
-    raw_df = load_raw_csv(RAW_DIR)
-    norm_df = normalize(raw_df)
+    all_norm = []
+
+    # CSV sources (déjà existant)
+    download_csv(CSV_SOURCE[0]["url"], RAW_DIR / "btc.csv")
+    raw_df = load_raw_csv(RAW_DIR / "btc.csv")
+    all_norm.append(normalize(raw_df))
+
+    # API sources (nouveau)
+    api_cfg = API_SOURCES[0]
+    payload = fetch_coingecko_market_chart(
+        api_cfg["base_url"],
+        api_cfg["coin_id"],
+        api_cfg["vs_currency"],
+        api_cfg["days"],
+    )
+    all_norm.append(
+        normalize_coingecko_market_chart(payload, api_cfg["symbol"], api_cfg["currency"], api_cfg["source"])
+    )
+    norm_df = pd.concat(all_norm, ignore_index=True)
 
     ensure_db(DB_PATH)
     inserted = write_ticks(norm_df, DB_PATH)
