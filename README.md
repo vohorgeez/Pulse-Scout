@@ -87,3 +87,7 @@ python main.py
 ```bash
 streamlit run app.py
 ```
+
+<p align="center">
+    <img src="assets/dashboard.png" alt="Pulse-Scout banner" width="100%">
+</p>
