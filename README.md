@@ -70,4 +70,20 @@ pulse-scout/
 
 ---
 
-## Utilisation (à venir)
+## Installation
+```bash
+python -m venv .venv
+# Windows PowerShell
+.venv\Scripts\activate
+python -m pip install -r requirements.txt
+```
+
+## Ingestion (met à jour la base SQLite)
+```bash
+python main.py
+```
+
+## Dashboard
+```bash
+streamlit run app.py
+```
